@@ -90,6 +90,25 @@ export interface OpportunityBrief {
   updated_at?: string
 }
 
+export interface ProposalStrategy {
+  id?: string
+  contract_id: string
+  business_profile_id: string
+  recommendation: 'GO' | 'NO-GO' | 'CONDITIONAL'
+  confidence_score: number
+  strengths: string[]
+  weaknesses: string[]
+  required_documents: string[]
+  evaluation_factors: Record<string, string>
+  pricing_guidance: string
+  teaming_recommendations: string[]
+  timeline: Record<string, string>
+  next_steps: string[]
+  generated_by: string
+  created_at?: string
+  updated_at?: string
+}
+
 export type Database = {
   public: {
     Tables: {

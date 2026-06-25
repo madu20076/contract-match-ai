@@ -8,7 +8,7 @@ import Navbar from '@/components/Navbar'
 import ContractCard from '@/components/ContractCard'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { generateMockMatches, MOCK_CONTRACTS } from '@/lib/mockData'
-import type { ContractMatch, Contract, OpportunityBrief } from '@/types'
+import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy } from '@/types'
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const PAGE_LOAD_TIME = Date.now()
@@ -217,6 +217,52 @@ function BestOpportunityCard({ item }: { item: BriefWithContract }) {
   )
 }
 
+// ── Strategy row (module scope) ───────────────────────────────
+
+interface StrategyWithContract extends ProposalStrategy {
+  contract: Contract | null
+}
+
+const REC_STYLE = {
+  GO:          'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'NO-GO':     'bg-red-50 text-red-700 border-red-200',
+  CONDITIONAL: 'bg-amber-50 text-amber-700 border-amber-200',
+} as const
+
+function StrategyRow({ item }: { item: StrategyWithContract }) {
+  const c   = item.contract
+  const now = PAGE_LOAD_TIME
+  if (!c) return null
+  const days = Math.ceil((new Date(c.due_date).getTime() - now) / 86_400_000)
+
+  return (
+    <Link
+      href={`/contracts/${c.id}`}
+      className="flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
+    >
+      <div className={`shrink-0 flex flex-col items-center rounded-xl border px-2.5 py-1.5 text-center ${REC_STYLE[item.recommendation]}`}>
+        <span className="text-base font-black leading-none">{item.confidence_score}</span>
+        <span className="text-[9px] font-bold uppercase tracking-wide">{item.recommendation}</span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+          {c.title}
+        </p>
+        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+          <span>{c.agency}</span>
+          <SourceBadge name={c.source_name} />
+        </p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p className={`text-xs ${days <= 14 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+          {days <= 0 ? 'Closed' : `${days}d left`}
+        </p>
+      </div>
+      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors shrink-0" />
+    </Link>
+  )
+}
+
 // ── Dashboard content ─────────────────────────────────────────
 
 function DashboardContent() {
@@ -226,6 +272,7 @@ function DashboardContent() {
   const [dibbsContracts,  setDibbsContracts]  = useState<Contract[]>([])
   const [recentContracts, setRecentContracts] = useState<Contract[]>([])
   const [bestBriefs,      setBestBriefs]      = useState<BriefWithContract[]>([])
+  const [bestStrategies,  setBestStrategies]  = useState<StrategyWithContract[]>([])
   const [loading,         setLoading]         = useState(true)
   const [dataSource,      setDataSource]      = useState<'supabase' | 'mock'>('mock')
 
@@ -266,13 +313,20 @@ function DashboardContent() {
           .select('*, contract:contracts(*)')
           .order('fit_score', { ascending: false })
           .limit(5),
-      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes]) => {
+        supabase
+          .from('proposal_strategies')
+          .select('*, contract:contracts(*)')
+          .eq('business_profile_id', profileId)
+          .order('confidence_score', { ascending: false })
+          .limit(6),
+      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes, strategiesRes]) => {
         if (cancelled) return
         if (!matchesRes.error && (matchesRes.data?.length ?? 0) > 0) {
           setTopMatches(matchesRes.data as unknown as ContractMatch[])
           setDibbsContracts((dibbsRes.data ?? []) as unknown as Contract[])
           setRecentContracts((recentRes.data ?? []) as unknown as Contract[])
           setBestBriefs((briefsRes.data ?? []) as unknown as BriefWithContract[])
+          setBestStrategies((strategiesRes.data ?? []) as unknown as StrategyWithContract[])
           setDataSource('supabase')
           setLoading(false)
           return
@@ -370,6 +424,21 @@ function DashboardContent() {
                   .map((item) => (
                     <BestOpportunityCard key={item.id ?? item.contract_id} item={item} />
                   ))}
+              </div>
+            </Section>
+          )}
+
+          {/* ── Section 1c: My Best Opportunities (from strategy scores) ── */}
+          {!isDemo && bestStrategies.length > 0 && (
+            <Section
+              title="My Best Opportunities"
+              subtitle="Ranked by your personalized GO/NO-GO strategy confidence score"
+              count={bestStrategies.length}
+            >
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                {bestStrategies.map((item) => (
+                  <StrategyRow key={item.id ?? item.contract_id} item={item} />
+                ))}
               </div>
             </Section>
           )}

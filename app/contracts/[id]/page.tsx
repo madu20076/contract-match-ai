@@ -8,12 +8,13 @@ import {
   CheckSquare, Lightbulb, ExternalLink, AlertCircle, Sparkles,
   RefreshCw, CheckCircle2, AlertTriangle, XCircle, ChevronDown,
   ChevronUp, Target, TrendingUp, Shield, Zap,
+  ThumbsUp, ThumbsDown, Minus, Users, BookOpen,
 } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import MatchScoreBadge from '@/components/MatchScoreBadge'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { getMockContractById, getMockMatchByContractId } from '@/lib/mockData'
-import type { Contract, ContractMatch, ContractAnalysis, OpportunityBrief } from '@/types'
+import type { Contract, ContractMatch, ContractAnalysis, OpportunityBrief, ProposalStrategy } from '@/types'
 
 // ── Formatters ────────────────────────────────────────────────
 
@@ -402,6 +403,151 @@ function OpportunityBriefSection({ brief }: { brief: OpportunityBrief }) {
   )
 }
 
+// ── Proposal Strategy section (module scope) ──────────────────
+
+const RECOMMENDATION_CONFIG = {
+  GO:          { color: 'bg-emerald-50 text-emerald-800 border-emerald-300', Icon: ThumbsUp,   label: 'GO — Pursue This Contract' },
+  'NO-GO':     { color: 'bg-red-50 text-red-800 border-red-300',             Icon: ThumbsDown, label: 'NO-GO — Pass on This Contract' },
+  CONDITIONAL: { color: 'bg-amber-50 text-amber-800 border-amber-300',        Icon: Minus,      label: 'CONDITIONAL — Pursue with Conditions' },
+} as const
+
+function ProposalStrategySection({
+  strategy, onRefresh, refreshing,
+}: {
+  strategy:   ProposalStrategy
+  onRefresh:  () => void
+  refreshing: boolean
+}) {
+  const cfg    = RECOMMENDATION_CONFIG[strategy.recommendation]
+  const RecIcon = cfg.Icon
+  const isAI   = strategy.generated_by.startsWith('anthropic')
+  const scoreRing =
+    strategy.confidence_score >= 65 ? 'border-emerald-400'
+    : strategy.confidence_score >= 42 ? 'border-amber-400'
+    : 'border-red-400'
+
+  return (
+    <div className="mt-8 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Target className="w-5 h-5 text-emerald-600" />
+          <h2 className="text-lg font-bold text-slate-900">Proposal Strategy</h2>
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${isAI ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+            {isAI ? 'Claude' : 'Rule-based'}
+          </span>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          Regenerate
+        </button>
+      </div>
+
+      {/* Recommendation banner */}
+      <div className={`flex items-center gap-4 rounded-2xl border px-6 py-5 ${cfg.color}`}>
+        <RecIcon className="w-8 h-8 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-lg font-black">{cfg.label}</p>
+          <p className="text-sm font-medium mt-0.5 opacity-80">Confidence: {strategy.confidence_score}/100</p>
+        </div>
+        <div className={`w-16 h-16 rounded-full border-4 flex items-center justify-center text-xl font-black ${scoreRing}`}>
+          {strategy.confidence_score}
+        </div>
+      </div>
+
+      {/* Strengths + Weaknesses */}
+      <div className="grid sm:grid-cols-2 gap-5">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <ThumbsUp className="w-4 h-4 text-emerald-500" /> Strengths
+          </h3>
+          <BulletList items={strategy.strengths} icon={CheckCircle2} color="text-emerald-500" />
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <ThumbsDown className="w-4 h-4 text-red-500" /> Weaknesses
+          </h3>
+          <BulletList items={strategy.weaknesses} icon={AlertTriangle} color="text-amber-500" />
+        </div>
+      </div>
+
+      {/* Required documents */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+          <BookOpen className="w-4 h-4 text-slate-400" /> Required Documents
+        </h3>
+        <TagList items={strategy.required_documents} color="bg-slate-50 text-slate-700 border-slate-200" />
+      </div>
+
+      {/* Evaluation factors */}
+      {Object.keys(strategy.evaluation_factors).length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-indigo-500" /> Evaluation Factors
+          </h3>
+          <div className="space-y-3">
+            {Object.entries(strategy.evaluation_factors).map(([factor, guidance]) => (
+              <div key={factor} className="border border-slate-100 rounded-xl p-4">
+                <p className="text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">{factor}</p>
+                <p className="text-sm text-slate-600">{guidance}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pricing guidance */}
+      {strategy.pricing_guidance && (
+        <div className="bg-gradient-to-r from-emerald-50 to-white border border-emerald-200 rounded-2xl p-5">
+          <h3 className="text-sm font-bold text-emerald-900 mb-2 flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-emerald-600" /> Pricing Guidance
+          </h3>
+          <p className="text-sm text-emerald-800 leading-relaxed">{strategy.pricing_guidance}</p>
+        </div>
+      )}
+
+      {/* Teaming */}
+      {strategy.teaming_recommendations.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <Users className="w-4 h-4 text-indigo-500" /> Teaming Recommendations
+          </h3>
+          <BulletList items={strategy.teaming_recommendations} icon={CheckCircle2} color="text-indigo-500" />
+        </div>
+      )}
+
+      {/* Timeline */}
+      {Object.keys(strategy.timeline).length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-slate-400" /> Strategy Timeline
+          </h3>
+          <div className="space-y-2">
+            {Object.entries(strategy.timeline).map(([key, val]) => (
+              <div key={key} className="flex justify-between text-sm">
+                <span className="text-slate-500 capitalize">{key.replace(/_/g, ' ')}</span>
+                <span className="font-medium text-slate-700">{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Next steps */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <Lightbulb className="w-4 h-4 text-indigo-500" /> Next Steps
+        </h3>
+        <NumberedList items={strategy.next_steps} />
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
 function ContractDetailContent() {
@@ -414,8 +560,11 @@ function ContractDetailContent() {
   const [analysis,   setAnalysis]   = useState<ContractAnalysis | null>(null)
   const [analyzing,  setAnalyzing]  = useState(false)
   const [analyzeErr, setAnalyzeErr] = useState<string | null>(null)
-  const [isDemo,     setIsDemo]     = useState(false)
-  const [brief,      setBrief]      = useState<OpportunityBrief | null>(null)
+  const [isDemo,         setIsDemo]         = useState(false)
+  const [brief,          setBrief]          = useState<OpportunityBrief | null>(null)
+  const [strategy,       setStrategy]       = useState<ProposalStrategy | null>(null)
+  const [strategyLoading, setStrategyLoading] = useState(false)
+  const [strategyErr,    setStrategyErr]    = useState<string | null>(null)
 
   const profileId =
     searchParams.get('profile') ??
@@ -445,15 +594,18 @@ function ContractDetailContent() {
           if (briefRes.data) setBrief(briefRes.data as OpportunityBrief)
 
           if (profileId && profileId !== 'demo') {
-            const [matchRes, analysisRes] = await Promise.all([
+            const [matchRes, analysisRes, stratRes] = await Promise.all([
               supabase.from('contract_matches').select('*')
                 .eq('contract_id', id).eq('business_profile_id', profileId).maybeSingle(),
               supabase.from('contract_analyses').select('*')
                 .eq('contract_id', id).eq('business_profile_id', profileId)
                 .order('created_at', { ascending: false }).limit(1).maybeSingle(),
+              supabase.from('proposal_strategies').select('*')
+                .eq('contract_id', id).eq('business_profile_id', profileId).maybeSingle(),
             ])
             if (matchRes.data)    setMatch(matchRes.data as ContractMatch)
             if (analysisRes.data) { setAnalysis(analysisRes.data as ContractAnalysis); setIsDemo(false) }
+            if (stratRes.data)    setStrategy(stratRes.data as ProposalStrategy)
           }
 
           setLoading(false)
@@ -508,6 +660,31 @@ function ContractDetailContent() {
       setAnalyzeErr(err instanceof Error ? err.message : 'Network error')
     } finally {
       setAnalyzing(false)
+    }
+  }, [contract, profileId])
+
+  const generateStrategy = useCallback(async (refresh = false) => {
+    if (!contract || !profileId || profileId === 'demo') return
+    setStrategyLoading(true)
+    setStrategyErr(null)
+
+    try {
+      const res  = await fetch('/api/proposal-strategy', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ contract_id: contract.id, business_profile_id: profileId, refresh }),
+      })
+      const data = await res.json() as { strategy?: ProposalStrategy; error?: string }
+
+      if (!res.ok || data.error) {
+        setStrategyErr(data.error ?? 'Strategy generation failed')
+        return
+      }
+      if (data.strategy) setStrategy(data.strategy)
+    } catch (err) {
+      setStrategyErr(err instanceof Error ? err.message : 'Network error')
+    } finally {
+      setStrategyLoading(false)
     }
   }, [contract, profileId])
 
@@ -581,6 +758,17 @@ function ContractDetailContent() {
                 >
                   <Sparkles className="w-4 h-4" />
                   Analyze This Contract
+                </button>
+              )}
+
+              {/* Strategy button */}
+              {hasProfile && !strategy && !strategyLoading && (
+                <button
+                  onClick={() => generateStrategy(false)}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shadow-sm"
+                >
+                  <Target className="w-4 h-4" />
+                  Generate Strategy
                 </button>
               )}
             </div>
@@ -712,6 +900,48 @@ function ContractDetailContent() {
 
         {/* ── Opportunity Brief section ── */}
         {brief && <OpportunityBriefSection brief={brief} />}
+
+        {/* ── Proposal Strategy section ── */}
+        {strategy && (
+          <ProposalStrategySection
+            strategy={strategy}
+            onRefresh={() => generateStrategy(true)}
+            refreshing={strategyLoading}
+          />
+        )}
+        {strategyLoading && (
+          <div className="mt-8 flex items-center gap-3 text-slate-600 py-8">
+            <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" />
+            <span className="text-sm font-medium">Generating proposal strategy…</span>
+          </div>
+        )}
+        {strategyErr && (
+          <div className="mt-6 flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4">
+            <XCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-semibold text-red-800">Strategy generation failed</p>
+              <p className="text-red-700 text-xs mt-0.5">{strategyErr}</p>
+              <button onClick={() => generateStrategy(true)}
+                className="text-xs text-red-600 underline mt-1 hover:text-red-800">Try again</button>
+            </div>
+          </div>
+        )}
+        {hasProfile && !strategy && !strategyLoading && !strategyErr && (
+          <div className="mt-8 flex flex-col items-center gap-3 py-12 border-2 border-dashed border-emerald-200 rounded-2xl">
+            <Target className="w-8 h-8 text-slate-300" />
+            <div className="text-center">
+              <p className="text-sm font-semibold text-slate-600">Generate a personalized bid/no-bid strategy</p>
+              <p className="text-xs text-slate-400 mt-1">GO / NO-GO recommendation · Confidence score · Pricing guidance · Next steps</p>
+            </div>
+            <button
+              onClick={() => generateStrategy(false)}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-6 py-3 rounded-xl transition-colors shadow-sm mt-1"
+            >
+              <Target className="w-4 h-4" />
+              Generate Proposal Strategy
+            </button>
+          </div>
+        )}
 
         {/* ── AI Analysis section ── */}
         <div className="mt-2">
