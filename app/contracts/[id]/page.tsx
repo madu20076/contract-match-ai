@@ -8,7 +8,7 @@ import {
   CheckSquare, Lightbulb, ExternalLink, AlertCircle, Sparkles,
   RefreshCw, CheckCircle2, AlertTriangle, XCircle, ChevronDown,
   ChevronUp, Target, TrendingUp, Shield, Zap,
-  ThumbsUp, ThumbsDown, Minus, Users, BookOpen,
+  ThumbsUp, ThumbsDown, Minus, Users, BookOpen, FolderOpen,
 } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import MatchScoreBadge from '@/components/MatchScoreBadge'
@@ -770,6 +770,17 @@ function ContractDetailContent() {
                   <Target className="w-4 h-4" />
                   Generate Strategy
                 </button>
+              )}
+
+              {/* Workspace button */}
+              {hasProfile && (
+                <Link
+                  href={`/workspace/${id}?profile=${profileId}`}
+                  className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shadow-sm"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Open Workspace
+                </Link>
               )}
             </div>
           </div>

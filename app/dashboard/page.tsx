@@ -3,12 +3,12 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target } from 'lucide-react'
+import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target, FolderOpen } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import ContractCard from '@/components/ContractCard'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { generateMockMatches, MOCK_CONTRACTS } from '@/lib/mockData'
-import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy } from '@/types'
+import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy, ProposalWorkspace } from '@/types'
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const PAGE_LOAD_TIME = Date.now()
@@ -217,6 +217,43 @@ function BestOpportunityCard({ item }: { item: BriefWithContract }) {
   )
 }
 
+// ── Active workspace row (module scope) ───────────────────────
+
+type WorkspaceWithContract = Omit<ProposalWorkspace, 'contract'> & { contract: Contract | null }
+
+function ActiveWorkspaceRow({ item, profileId }: { item: WorkspaceWithContract; profileId: string }) {
+  const c   = item.contract
+  const now = PAGE_LOAD_TIME
+  if (!c) return null
+  const days = Math.ceil((new Date(c.due_date).getTime() - now) / 86_400_000)
+
+  return (
+    <Link
+      href={`/workspace/${c.id}?profile=${profileId}`}
+      className="flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
+    >
+      <div className="shrink-0 w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center">
+        <FolderOpen className="w-4 h-4 text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+          {c.title}
+        </p>
+        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+          <span>{c.agency}</span>
+          <SourceBadge name={c.source_name} />
+        </p>
+      </div>
+      <div className="shrink-0 text-right">
+        <p className={`text-xs ${days <= 14 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+          {days <= 0 ? 'Closed' : `${days}d left`}
+        </p>
+      </div>
+      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors shrink-0" />
+    </Link>
+  )
+}
+
 // ── Strategy row (module scope) ───────────────────────────────
 
 interface StrategyWithContract extends ProposalStrategy {
@@ -272,7 +309,8 @@ function DashboardContent() {
   const [dibbsContracts,  setDibbsContracts]  = useState<Contract[]>([])
   const [recentContracts, setRecentContracts] = useState<Contract[]>([])
   const [bestBriefs,      setBestBriefs]      = useState<BriefWithContract[]>([])
-  const [bestStrategies,  setBestStrategies]  = useState<StrategyWithContract[]>([])
+  const [bestStrategies,    setBestStrategies]    = useState<StrategyWithContract[]>([])
+  const [activeWorkspaces,  setActiveWorkspaces]  = useState<WorkspaceWithContract[]>([])
   const [loading,         setLoading]         = useState(true)
   const [dataSource,      setDataSource]      = useState<'supabase' | 'mock'>('mock')
 
@@ -319,7 +357,14 @@ function DashboardContent() {
           .eq('business_profile_id', profileId)
           .order('confidence_score', { ascending: false })
           .limit(6),
-      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes, strategiesRes]) => {
+        supabase
+          .from('proposal_workspaces')
+          .select('*, contract:contracts(*)')
+          .eq('business_profile_id', profileId)
+          .eq('status', 'active')
+          .order('updated_at', { ascending: false })
+          .limit(5),
+      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes, strategiesRes, workspacesRes]) => {
         if (cancelled) return
         if (!matchesRes.error && (matchesRes.data?.length ?? 0) > 0) {
           setTopMatches(matchesRes.data as unknown as ContractMatch[])
@@ -327,6 +372,7 @@ function DashboardContent() {
           setRecentContracts((recentRes.data ?? []) as unknown as Contract[])
           setBestBriefs((briefsRes.data ?? []) as unknown as BriefWithContract[])
           setBestStrategies((strategiesRes.data ?? []) as unknown as StrategyWithContract[])
+          setActiveWorkspaces((workspacesRes.data ?? []) as unknown as WorkspaceWithContract[])
           setDataSource('supabase')
           setLoading(false)
           return
@@ -438,6 +484,21 @@ function DashboardContent() {
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
                 {bestStrategies.map((item) => (
                   <StrategyRow key={item.id ?? item.contract_id} item={item} />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {/* ── Section 1d: My Active Proposals (workspaces) ── */}
+          {!isDemo && activeWorkspaces.length > 0 && (
+            <Section
+              title="My Active Proposals"
+              subtitle="Contracts where you have an open proposal workspace"
+              count={activeWorkspaces.length}
+            >
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                {activeWorkspaces.map((item) => (
+                  <ActiveWorkspaceRow key={item.id} item={item} profileId={profileId} />
                 ))}
               </div>
             </Section>

@@ -109,6 +109,49 @@ export interface ProposalStrategy {
   updated_at?: string
 }
 
+export interface ProposalWorkspace {
+  id: string
+  contract_id: string
+  business_profile_id: string
+  status: 'active' | 'archived'
+  created_at: string
+  updated_at: string
+  contract?: Contract
+}
+
+export interface ProposalTask {
+  id: string
+  workspace_id: string
+  title: string
+  description?: string
+  status: 'todo' | 'in_progress' | 'done'
+  due_date?: string
+  section: string
+  priority: 'low' | 'medium' | 'high'
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ProposalDocument {
+  id: string
+  workspace_id: string
+  name: string
+  file_path: string
+  file_size?: number
+  mime_type?: string
+  uploaded_by?: string
+  created_at: string
+}
+
+export interface ProposalNote {
+  id: string
+  workspace_id: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
 export type Database = {
   public: {
     Tables: {
