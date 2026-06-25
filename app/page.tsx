@@ -1,65 +1,185 @@
-import Image from "next/image";
+import Link from 'next/link'
+import { ArrowRight, CheckCircle2, Search, Zap, Shield } from 'lucide-react'
 
-export default function Home() {
+const features = [
+  {
+    icon: Search,
+    title: 'Smart Contract Discovery',
+    desc: 'We scan thousands of federal and state contracts daily and surface only the ones relevant to your business.',
+  },
+  {
+    icon: Zap,
+    title: 'AI-Powered Matching',
+    desc: 'Our matching engine weighs your NAICS codes, certifications, location, and past performance to score each opportunity.',
+  },
+  {
+    icon: Shield,
+    title: 'Built for Small Business',
+    desc: 'Set-asides, HUBZone, 8(a), SDVOSB — we understand the certifications that open doors for you.',
+  },
+]
+
+const steps = [
+  { num: '01', title: 'Build your profile', desc: 'Tell us about your business: industry, certifications, location, and experience.' },
+  { num: '02', title: 'Get matched instantly', desc: 'Our AI scores every open contract against your profile and ranks the best fits.' },
+  { num: '03', title: 'Win more contracts', desc: 'Follow our guided next steps to prepare a winning proposal.' },
+]
+
+const stats = [
+  { value: '40K+', label: 'Active opportunities' },
+  { value: '94%', label: 'Match accuracy' },
+  { value: '3 min', label: 'To your first match' },
+  { value: '$0', label: 'Free to start' },
+]
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="flex flex-col min-h-screen">
+      {/* Navbar */}
+      <nav className="bg-slate-900 border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
+              <span className="text-white text-sm font-bold">CM</span>
+            </div>
+            <span className="font-semibold text-white text-lg">Contract Match AI</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <Link href="/dashboard" className="text-sm text-slate-400 hover:text-white transition-colors">
+              Dashboard
+            </Link>
+            <Link
+              href="/onboarding"
+              className="text-sm font-medium bg-indigo-500 hover:bg-indigo-400 text-white px-4 py-2 rounded-full transition-colors"
+            >
+              Start Free
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white py-24 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 bg-indigo-500/20 border border-indigo-500/30 rounded-full px-4 py-1.5 text-sm text-indigo-300 mb-8">
+            <Zap className="w-3.5 h-3.5" />
+            AI-powered government contract matching
+          </div>
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-tight mb-6">
+            Find contracts your business
+            <span className="text-indigo-400"> can actually win</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-lg sm:text-xl text-slate-300 max-w-2xl mx-auto mb-10 leading-relaxed">
+            Stop sifting through thousands of irrelevant bids. Contract Match AI analyzes your capabilities
+            and surfaces only the government contracts you&apos;re best positioned to win.
           </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link
+              href="/onboarding"
+              className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-400 text-white font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg shadow-indigo-500/30"
+            >
+              Start Free
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white font-medium px-8 py-4 rounded-full text-base transition-colors"
+            >
+              View Demo Dashboard
+            </Link>
+          </div>
+
+          {/* Trust line */}
+          <div className="flex flex-wrap items-center justify-center gap-6 mt-12 text-sm text-slate-400">
+            {['No credit card required', 'Free to get started', 'Cancel anytime'].map((t) => (
+              <span key={t} className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                {t}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      {/* Stats */}
+      <section className="bg-white border-y border-slate-200 py-12 px-4">
+        <div className="max-w-5xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-8">
+          {stats.map(({ value, label }) => (
+            <div key={label} className="text-center">
+              <p className="text-3xl font-bold text-indigo-600">{value}</p>
+              <p className="text-sm text-slate-500 mt-1">{label}</p>
+            </div>
+          ))}
         </div>
-      </main>
+      </section>
+
+      {/* Features */}
+      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-slate-50">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl font-bold text-slate-900 mb-3">Everything you need to compete</h2>
+            <p className="text-slate-500 text-lg max-w-xl mx-auto">
+              Built specifically for small businesses navigating the complexity of government procurement.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-8">
+            {features.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+                <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center mb-4">
+                  <Icon className="w-5 h-5 text-indigo-600" />
+                </div>
+                <h3 className="font-semibold text-slate-900 text-base mb-2">{title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl font-bold text-slate-900 mb-3">How it works</h2>
+            <p className="text-slate-500 text-lg">Three steps from profile to winning bid.</p>
+          </div>
+          <div className="grid sm:grid-cols-3 gap-10">
+            {steps.map(({ num, title, desc }) => (
+              <div key={num} className="flex flex-col items-center text-center sm:items-start sm:text-left">
+                <span className="text-4xl font-black text-indigo-100 mb-3 leading-none">{num}</span>
+                <h3 className="font-semibold text-slate-900 text-base mb-2">{title}</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Banner */}
+      <section className="bg-indigo-600 py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="text-3xl font-bold text-white mb-4">
+            Ready to find contracts you can win?
+          </h2>
+          <p className="text-indigo-200 text-lg mb-8">
+            Create your free business profile in under 3 minutes and get matched with live opportunities today.
+          </p>
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center gap-2 bg-white text-indigo-600 hover:bg-indigo-50 font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg"
+          >
+            Start Free — No Credit Card Needed
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="bg-slate-900 py-10 px-4 text-center">
+        <p className="text-slate-500 text-sm">
+          © {new Date().getFullYear()} Contract Match AI. Built for small businesses competing in government procurement.
+        </p>
+      </footer>
     </div>
-  );
+  )
 }
