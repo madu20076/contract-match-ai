@@ -7,20 +7,24 @@ import {
   ArrowLeft, BookOpen, CheckCircle2, Circle, Clock, Copy, FileText, MessageSquare,
   RefreshCw, Upload, Trash2, Sparkles, ChevronDown, ChevronUp,
   Target, TrendingUp, AlertCircle, Plus, Save, Building2,
-  CheckSquare, LayoutDashboard, FolderOpen,
+  CheckSquare, LayoutDashboard, FolderOpen, Shield, Zap, Info,
 } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import type {
   ProposalWorkspace, ProposalTask, ProposalDocument, ProposalNote,
   ProposalSection, SectionType, Contract,
+  RFPDocument, RFPRequirement, ComplianceItem, ProposalReadiness, RFPAmendment,
 } from '@/types'
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const WORKSPACE_LOAD_TIME = Date.now()
 
+// Rejects 'demo', 'mock-...', 'YOUR_PROFILE_ID', and any other non-UUID strings
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 // ── Types ─────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'tasks' | 'documents' | 'notes' | 'sections'
+type Tab = 'overview' | 'tasks' | 'documents' | 'notes' | 'sections' | 'rfp'
 
 interface WorkspaceData {
   workspace:  ProposalWorkspace
@@ -546,7 +550,531 @@ function NotesPanel({
   )
 }
 
+// ── RFP Intelligence ──────────────────────────────────────────
+
+interface RFPData {
+  document:        RFPDocument | null
+  requirements:    RFPRequirement[]
+  complianceItems: ComplianceItem[]
+  readiness:       ProposalReadiness | null
+  amendments:      RFPAmendment[]
+}
+
+const REQ_TYPE_LABEL: Record<string, string> = {
+  mandatory:         'Mandatory',
+  evaluation_factor: 'Evaluation Factor',
+  deliverable:       'Deliverable',
+  certification:     'Certification',
+  clin:              'CLIN',
+  attachment:        'Attachment',
+  date_milestone:    'Key Date',
+  technical:         'Technical',
+  management:        'Management',
+}
+
+const REQ_TYPE_COLOR: Record<string, string> = {
+  mandatory:         'bg-red-50 text-red-700 border-red-200',
+  evaluation_factor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  deliverable:       'bg-amber-50 text-amber-700 border-amber-200',
+  certification:     'bg-emerald-50 text-emerald-700 border-emerald-200',
+  clin:              'bg-blue-50 text-blue-700 border-blue-200',
+  attachment:        'bg-slate-50 text-slate-600 border-slate-200',
+  date_milestone:    'bg-violet-50 text-violet-700 border-violet-200',
+  technical:         'bg-cyan-50 text-cyan-700 border-cyan-200',
+  management:        'bg-orange-50 text-orange-700 border-orange-200',
+}
+
+const COMPLIANCE_STYLE: Record<string, { cls: string; label: string }> = {
+  compliant:     { cls: 'bg-emerald-100 text-emerald-700', label: 'Compliant' },
+  partial:       { cls: 'bg-amber-100 text-amber-700',     label: 'Partial' },
+  not_addressed: { cls: 'bg-red-100 text-red-600',         label: 'Not Addressed' },
+  exception:     { cls: 'bg-slate-100 text-slate-500',     label: 'Exception' },
+}
+
+const RISK_STYLE: Record<string, { cls: string; label: string }> = {
+  low:      { cls: 'bg-emerald-100 text-emerald-700', label: 'Low Risk' },
+  medium:   { cls: 'bg-amber-100 text-amber-700',     label: 'Medium Risk' },
+  high:     { cls: 'bg-red-100 text-red-700',         label: 'High Risk' },
+  critical: { cls: 'bg-red-200 text-red-800',         label: 'Critical Risk' },
+}
+
+function RFPUploadZone({
+  workspaceId, onUploaded, uploading, setUploading,
+}: {
+  workspaceId:  string
+  onUploaded:   (data: RFPData) => void
+  uploading:    boolean
+  setUploading: (v: boolean) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploadErr, setUploadErr] = useState<string | null>(null)
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadErr(null)
+    const form = new FormData()
+    form.append('rfp', file)
+    fetch(`/api/workspace/${workspaceId}/upload-rfp`, { method: 'POST', body: form })
+      .then(r => r.json())
+      .then((res: { error?: string } & Partial<RFPData>) => {
+        if (res.error) { setUploadErr(res.error); setUploading(false); return }
+        onUploaded({
+          document:        res.document        ?? null,
+          requirements:    res.requirements    ?? [],
+          complianceItems: res.complianceItems ?? [],
+          readiness:       res.readiness       ?? null,
+          amendments:      res.amendments      ?? [],
+        })
+        setUploading(false)
+      })
+      .catch((err: unknown) => {
+        setUploadErr(err instanceof Error ? err.message : 'Upload failed')
+        setUploading(false)
+      })
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border-2 border-dashed border-indigo-200 p-10 text-center">
+      <input ref={inputRef} type="file" className="hidden" onChange={handleChange}
+        accept=".pdf,.doc,.docx,.txt" />
+      <Shield className="w-10 h-10 text-indigo-300 mx-auto mb-3" />
+      <h3 className="text-base font-bold text-slate-700 mb-1">Upload Solicitation Document</h3>
+      <p className="text-sm text-slate-400 mb-4">
+        Upload the RFP, RFQ, or IFB document (PDF, DOCX, or TXT).<br />
+        AI will extract requirements, evaluation factors, CLINs, and build a compliance matrix.
+      </p>
+      {uploadErr && <p className="text-xs text-red-500 mb-3">{uploadErr}</p>}
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-medium px-6 py-2.5 rounded-xl transition-colors"
+      >
+        {uploading
+          ? <><RefreshCw className="w-4 h-4 animate-spin" /> Analyzing RFP…</>
+          : <><Upload className="w-4 h-4" /> Choose File</>
+        }
+      </button>
+      <p className="text-xs text-slate-300 mt-3">PDF and DOCX recommended · Up to 50 MB</p>
+    </div>
+  )
+}
+
+function ReadinessGauge({ readiness }: { readiness: ProposalReadiness }) {
+  const risk   = RISK_STYLE[readiness.risk_level] ?? RISK_STYLE.critical
+  const score  = readiness.overall_score
+  const color  = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : score >= 40 ? '#ef4444' : '#dc2626'
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <h3 className="text-sm font-bold text-slate-900 mb-5 flex items-center gap-2">
+        <Zap className="w-4 h-4 text-indigo-500" /> Proposal Readiness Score
+      </h3>
+
+      <div className="flex items-center gap-6 mb-6">
+        <div className="relative w-24 h-24 shrink-0">
+          <svg className="w-full h-full -rotate-90" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" fill="none" stroke="#e2e8f0" strokeWidth="8" />
+            <circle
+              cx="40" cy="40" r="32" fill="none"
+              stroke={color} strokeWidth="8"
+              strokeDasharray={`${2 * Math.PI * 32}`}
+              strokeDashoffset={`${2 * Math.PI * 32 * (1 - score / 100)}`}
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="absolute inset-0 flex items-center justify-center text-2xl font-black text-slate-900">{score}</span>
+        </div>
+        <div className="flex-1 space-y-2">
+          <span className={`inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full ${risk.cls}`}>
+            {risk.label}
+          </span>
+          {[
+            { label: 'Sections Written',   value: readiness.sections_score     },
+            { label: 'Requirements Met',   value: readiness.compliance_score   },
+            { label: 'Tasks Completed',    value: readiness.completeness_score },
+          ].map(({ label, value }) => (
+            <div key={label}>
+              <div className="flex justify-between text-xs mb-0.5">
+                <span className="text-slate-500">{label}</span>
+                <span className="font-medium text-slate-700">{value}%</span>
+              </div>
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${value}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {readiness.red_flags.length > 0 && (
+        <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-3">
+          <p className="text-xs font-bold text-red-700 mb-2 flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5" /> Red Flags
+          </p>
+          <ul className="space-y-1">
+            {readiness.red_flags.map((flag, i) => (
+              <li key={i} className="text-xs text-red-600">{flag}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {readiness.action_items.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+          <p className="text-xs font-bold text-amber-700 mb-2 flex items-center gap-1.5">
+            <Target className="w-3.5 h-3.5" /> Action Items
+          </p>
+          <ul className="space-y-1">
+            {readiness.action_items.map((item, i) => (
+              <li key={i} className="text-xs text-amber-700">• {item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RequirementsAccordion({ requirements }: { requirements: RFPRequirement[] }) {
+  const [openType, setOpenType] = useState<string | null>('mandatory')
+
+  const grouped = requirements.reduce<Record<string, RFPRequirement[]>>((acc, r) => {
+    const key = r.requirement_type
+    if (!acc[key]) acc[key] = []
+    acc[key].push(r)
+    return acc
+  }, {})
+
+  if (requirements.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-sm">
+        No requirements extracted yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {Object.keys(grouped).map(type => {
+        const items  = grouped[type]
+        const color  = REQ_TYPE_COLOR[type]  ?? 'bg-slate-50 text-slate-600 border-slate-200'
+        const label  = REQ_TYPE_LABEL[type]  ?? type
+        const isOpen = openType === type
+
+        return (
+          <div key={type} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setOpenType(isOpen ? null : type)}
+              className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-bold px-2 py-0.5 rounded border ${color}`}>{label}</span>
+                <span className="text-xs text-slate-400">{items.length} items</span>
+              </div>
+              {isOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+            </button>
+            {isOpen && (
+              <div className="border-t border-slate-100 divide-y divide-slate-50">
+                {items.map(req => (
+                  <div key={req.id} className="px-5 py-3 flex items-start gap-3">
+                    <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase mt-0.5 ${
+                      req.priority === 'critical' ? 'bg-red-50 text-red-600 border-red-200' :
+                      req.priority === 'high'     ? 'bg-amber-50 text-amber-600 border-amber-200' :
+                      'bg-slate-50 text-slate-400 border-slate-200'
+                    }`}>
+                      {req.priority}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-700 leading-relaxed">{req.text}</p>
+                      {req.source_section && (
+                        <p className="text-xs text-slate-400 mt-0.5">{req.source_section}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ComplianceTable({ items }: { items: ComplianceItem[] }) {
+  const addressed    = items.filter(c => c.compliance_status !== 'not_addressed').length
+  const pct          = items.length > 0 ? Math.round((addressed / items.length) * 100) : 0
+
+  if (items.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-sm">
+        Compliance matrix will be generated after RFP upload.
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+        <h3 className="text-sm font-bold text-slate-900">Compliance Matrix</h3>
+        <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+          pct >= 70 ? 'bg-emerald-100 text-emerald-700' :
+          pct >= 40 ? 'bg-amber-100 text-amber-700'     :
+          'bg-red-100 text-red-600'
+        }`}>
+          {pct}% addressed
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50">
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium w-12">Type</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium">Requirement</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium w-28">Section</th>
+              <th className="text-left px-4 py-2.5 text-slate-500 font-medium w-28">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {items.slice(0, 40).map(item => {
+              const cStyle = COMPLIANCE_STYLE[item.compliance_status] ?? COMPLIANCE_STYLE.not_addressed
+              const tColor = REQ_TYPE_COLOR[item.section_type ?? ''] ?? 'bg-slate-50 text-slate-500 border-slate-200'
+              return (
+                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase ${tColor}`}>
+                      {REQ_TYPE_LABEL[item.section_type ?? ''] ?? '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-600 leading-snug max-w-xs">
+                    <span className="line-clamp-2">{item.requirement_text}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-500">
+                    {item.section_type
+                      ? item.section_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                      : <span className="text-slate-300">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cStyle.cls}`}>
+                      {cStyle.label}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {items.length > 40 && (
+          <p className="text-xs text-slate-400 text-center py-3">
+            Showing 40 of {items.length} requirements
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AmendmentsList({ amendments }: { amendments: RFPAmendment[] }) {
+  if (amendments.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center text-slate-400 text-sm">
+        No amendments detected.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {amendments.map(amd => (
+        <div key={amd.id} className="bg-white rounded-xl border border-amber-200 shadow-sm p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-bold text-amber-700">Amendment #{amd.amendment_number}</span>
+            {amd.issued_date && (
+              <span className="text-xs text-slate-400">Issued {fmtDate(amd.issued_date)}</span>
+            )}
+          </div>
+          {amd.due_date_change && (
+            <p className="text-xs text-amber-600 mb-2">
+              <span className="font-semibold">Due Date Change:</span> {amd.due_date_change}
+            </p>
+          )}
+          {amd.changes.length > 0 && (
+            <ul className="text-xs text-slate-600 space-y-1">
+              {amd.changes.map((c, i) => <li key={i}>• {c}</li>)}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RFPSummaryBanner({
+  document: doc, requirements, amendments,
+}: {
+  document:     RFPDocument
+  requirements: RFPRequirement[]
+  amendments:   RFPAmendment[]
+}) {
+  const byType = requirements.reduce<Record<string, number>>((acc, r) => {
+    acc[r.requirement_type] = (acc[r.requirement_type] ?? 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <div className="bg-gradient-to-r from-indigo-50 to-slate-50 border border-indigo-200 rounded-2xl p-5">
+      <div className="flex items-start gap-4">
+        <div className="shrink-0 bg-indigo-600 rounded-xl p-2.5">
+          <Shield className="w-5 h-5 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-indigo-900">{doc.file_name}</p>
+          <p className="text-xs text-indigo-600 mt-0.5">
+            {doc.parsed_at ? `Analyzed ${fmtDate(doc.parsed_at)}` : 'Uploaded'} · {requirements.length} requirements extracted
+          </p>
+        </div>
+        {amendments.length > 0 && (
+          <span className="shrink-0 text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full">
+            {amendments.length} amendment{amendments.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+      {Object.keys(byType).length > 0 && (
+        <div className="flex flex-wrap gap-2 mt-4">
+          {Object.entries(byType).map(([type, count]) => (
+            <span key={type} className={`text-xs px-2.5 py-1 rounded-full border font-medium ${REQ_TYPE_COLOR[type] ?? 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+              {count} {REQ_TYPE_LABEL[type] ?? type}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RFPIntelligencePanel({
+  rfpData, workspaceId, onUploaded,
+}: {
+  rfpData:     RFPData | null
+  workspaceId: string
+  onUploaded:  (data: RFPData) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [showMatrix, setShowMatrix] = useState(false)
+
+  const hasDocument = rfpData?.document != null
+
+  return (
+    <div className="space-y-6">
+      {/* Upload zone — shown when no document yet, or as re-upload option */}
+      {!hasDocument ? (
+        <RFPUploadZone
+          workspaceId={workspaceId}
+          onUploaded={onUploaded}
+          uploading={uploading}
+          setUploading={setUploading}
+        />
+      ) : (
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <RFPSummaryBanner
+              document={rfpData.document!}
+              requirements={rfpData.requirements}
+              amendments={rfpData.amendments}
+            />
+          </div>
+          <button
+            onClick={() => setUploading(false)}
+            className="shrink-0 flex items-center gap-1.5 text-xs border border-slate-200 rounded-lg px-3 py-2 text-slate-500 hover:text-slate-800 bg-white transition-colors"
+            title="Replace RFP document"
+          >
+            <Upload className="w-3.5 h-3.5" /> Re-upload
+          </button>
+        </div>
+      )}
+
+      {/* Show upload zone if clicking re-upload */}
+      {hasDocument && uploading && (
+        <RFPUploadZone
+          workspaceId={workspaceId}
+          onUploaded={d => { onUploaded(d) }}
+          uploading={uploading}
+          setUploading={setUploading}
+        />
+      )}
+
+      {/* Readiness gauge */}
+      {rfpData?.readiness && (
+        <ReadinessGauge readiness={rfpData.readiness} />
+      )}
+
+      {/* Requirements accordion */}
+      {rfpData && rfpData.requirements.length > 0 && (
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <Info className="w-4 h-4 text-indigo-500" />
+            Extracted Requirements
+            <span className="text-xs font-normal text-slate-400">({rfpData.requirements.length} total)</span>
+          </h3>
+          <RequirementsAccordion requirements={rfpData.requirements} />
+        </div>
+      )}
+
+      {/* Compliance matrix (expandable) */}
+      {rfpData && rfpData.complianceItems.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowMatrix(v => !v)}
+            className="flex items-center gap-2 text-sm font-bold text-slate-900 mb-3 hover:text-indigo-600 transition-colors"
+          >
+            <Shield className="w-4 h-4 text-indigo-500" />
+            Compliance Matrix
+            {showMatrix ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+          {showMatrix && <ComplianceTable items={rfpData.complianceItems} />}
+        </div>
+      )}
+
+      {/* Amendments */}
+      {rfpData && rfpData.amendments.length > 0 && (
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-500" />
+            Solicitation Amendments
+          </h3>
+          <AmendmentsList amendments={rfpData.amendments} />
+        </div>
+      )}
+
+      {/* Empty state after upload */}
+      {!rfpData && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+          <Info className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+          <p className="text-sm text-slate-400">Upload the solicitation document above to extract requirements and build a compliance matrix.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Proposal Sections ─────────────────────────────────────────
+
+// Which requirement types each proposal section addresses
+const SECTION_REQ_COVERAGE: Record<SectionType, string[]> = {
+  executive_summary:  ['evaluation_factor'],
+  technical_approach: ['mandatory', 'technical', 'deliverable'],
+  management_plan:    ['management', 'mandatory'],
+  staffing_plan:      ['certification', 'management'],
+  quality_control:    ['mandatory', 'technical'],
+  past_performance:   ['evaluation_factor'],
+  pricing_narrative:  ['clin'],
+  cover_letter:       ['date_milestone'],
+  compliance_matrix:  ['mandatory', 'evaluation_factor', 'deliverable', 'certification'],
+}
 
 const SECTION_TYPES: ReadonlyArray<{ type: SectionType; label: string; description: string }> = [
   { type: 'executive_summary',  label: 'Executive Summary',  description: 'Company overview, value proposition, and proposal summary' },
@@ -561,13 +1089,14 @@ const SECTION_TYPES: ReadonlyArray<{ type: SectionType; label: string; descripti
 ]
 
 function SectionTypeButton({
-  label, description, isSelected, hasContent, onClick,
+  label, description, isSelected, hasContent, reqCount, onClick,
 }: {
   sectionType:  SectionType
   label:        string
   description:  string
   isSelected:   boolean
   hasContent:   boolean
+  reqCount:     number
   onClick:      () => void
 }) {
   return (
@@ -598,6 +1127,11 @@ function SectionTypeButton({
             {label}
           </p>
           <p className="text-xs text-slate-400 mt-0.5 leading-snug">{description}</p>
+          {reqCount > 0 && (
+            <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+              <Shield className="w-2.5 h-2.5" /> {reqCount} RFP req{reqCount !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
       </div>
     </button>
@@ -704,12 +1238,13 @@ function SectionEditor({
 }
 
 function SectionsPanel({
-  sections, workspaceId, onGenerated, onSaved,
+  sections, workspaceId, onGenerated, onSaved, rfpRequirements,
 }: {
-  sections:    ProposalSection[]
-  workspaceId: string
-  onGenerated: (s: ProposalSection) => void
-  onSaved:     (s: ProposalSection) => void
+  sections:        ProposalSection[]
+  workspaceId:     string
+  onGenerated:     (s: ProposalSection) => void
+  onSaved:         (s: ProposalSection) => void
+  rfpRequirements: RFPRequirement[]
 }) {
   const [selectedType, setSelectedType] = useState<SectionType | null>(null)
   const [generating,   setGenerating]   = useState(false)
@@ -750,17 +1285,22 @@ function SectionsPanel({
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sections</p>
           <span className="text-xs text-slate-400">{doneSections}/{totalTypes} generated</span>
         </div>
-        {SECTION_TYPES.map(({ type, label, description }) => (
-          <SectionTypeButton
-            key={type}
-            sectionType={type}
-            label={label}
-            description={description}
-            isSelected={selectedType === type}
-            hasContent={sections.some(s => s.section_type === type)}
-            onClick={() => { setSelectedType(type); setGenError(null) }}
-          />
-        ))}
+        {SECTION_TYPES.map(({ type, label, description }) => {
+          const coveredTypes = SECTION_REQ_COVERAGE[type] ?? []
+          const reqCount = rfpRequirements.filter(r => coveredTypes.includes(r.requirement_type)).length
+          return (
+            <SectionTypeButton
+              key={type}
+              sectionType={type}
+              label={label}
+              description={description}
+              isSelected={selectedType === type}
+              hasContent={sections.some(s => s.section_type === type)}
+              reqCount={reqCount}
+              onClick={() => { setSelectedType(type); setGenError(null) }}
+            />
+          )
+        })}
       </div>
 
       {/* Right column — editor or prompt */}
@@ -844,6 +1384,7 @@ function WorkspaceHeader({
     { key: 'documents',  label: 'Documents',  icon: FolderOpen      },
     { key: 'notes',      label: 'Notes',      icon: MessageSquare   },
     { key: 'sections',   label: 'Sections',   icon: BookOpen        },
+    { key: 'rfp',        label: 'RFP',        icon: Shield          },
   ]
 
   const progressColor =
@@ -929,24 +1470,34 @@ function WorkspaceContent() {
   const { contractId } = useParams<{ contractId: string }>()
   const searchParams   = useSearchParams()
 
-  const profileId =
+  // Read raw value from URL param or localStorage
+  const rawProfile =
     searchParams.get('profile') ??
     (typeof window !== 'undefined' ? localStorage.getItem('cmai_profile_id') : null) ??
-    'demo'
+    ''
+
+  // Only accept valid UUIDs — rejects 'demo', 'mock-...', 'YOUR_PROFILE_ID', etc.
+  // Clears stale/invalid value from localStorage so it doesn't persist.
+  const profileId: string | null = UUID_RE.test(rawProfile) ? rawProfile : null
+  if (typeof window !== 'undefined' && rawProfile && !UUID_RE.test(rawProfile)) {
+    localStorage.removeItem('cmai_profile_id')
+  }
 
   const [data,          setData]          = useState<WorkspaceData | null>(null)
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState<string | null>(null)
   const [tab,           setTab]           = useState<Tab>('overview')
   const [tick,          setTick]          = useState(0)
-  const [sections,      setSections]      = useState<ProposalSection[]>([])
+  const [sections,       setSections]       = useState<ProposalSection[]>([])
   const [sectionsLoaded, setSectionsLoaded] = useState(false)
+  const [rfpData,        setRfpData]        = useState<RFPData | null>(null)
+  const [rfpLoaded,      setRfpLoaded]      = useState(false)
 
   // Auto-create or load workspace on mount
   useEffect(() => {
     let cancelled = false
 
-    if (!contractId || profileId === 'demo') {
+    if (!contractId || !profileId) {
       Promise.resolve().then(() => { if (!cancelled) setLoading(false) })
       return () => { cancelled = true }
     }
@@ -1022,6 +1573,36 @@ function WorkspaceContent() {
     setSections(prev => prev.map(s => s.id === section.id ? section : s))
   }, [])
 
+  // Lazy-load RFP intelligence when the RFP tab is first opened
+  useEffect(() => {
+    let cancelled = false
+    if (tab !== 'rfp' || rfpLoaded || !data) {
+      return () => { cancelled = true }
+    }
+    fetch(`/api/workspace/${data.workspace.id}/rfp`)
+      .then(r => r.json())
+      .then((res: Partial<RFPData>) => {
+        if (cancelled) return
+        setRfpData({
+          document:        res.document        ?? null,
+          requirements:    res.requirements    ?? [],
+          complianceItems: res.complianceItems ?? [],
+          readiness:       res.readiness       ?? null,
+          amendments:      res.amendments      ?? [],
+        })
+        setRfpLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) setRfpLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [tab, rfpLoaded, data])
+
+  const handleRFPUploaded = useCallback((uploadedData: RFPData) => {
+    setRfpData(uploadedData)
+    setRfpLoaded(true)
+  }, [])
+
   const updateTask = useCallback((taskId: string, status: ProposalTask['status']) => {
     if (!data) return
 
@@ -1054,22 +1635,33 @@ function WorkspaceContent() {
     setData(prev => prev ? { ...prev, note } : prev)
   }, [])
 
-  // ── No profile ───────────────────────────────────────────────
+  // ── No valid profile ─────────────────────────────────────────
 
-  if (!loading && profileId === 'demo') {
+  if (!loading && !profileId) {
     return (
       <div className="min-h-screen bg-slate-50">
         <Navbar />
         <div className="max-w-2xl mx-auto px-4 py-24 text-center">
           <AlertCircle className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-slate-700 mb-2">Profile required</h2>
-          <p className="text-slate-500 mb-6 text-sm">
+          <h2 className="text-xl font-bold text-slate-700 mb-2">Business profile required</h2>
+          <p className="text-slate-500 mb-2 text-sm">
             A business profile is required to create a proposal workspace.
           </p>
-          <Link href="/onboarding"
-            className="inline-flex items-center gap-2 bg-indigo-600 text-white font-medium px-5 py-2.5 rounded-full text-sm hover:bg-indigo-700 transition-colors">
-            Complete Onboarding →
-          </Link>
+          {rawProfile && !UUID_RE.test(rawProfile) && (
+            <p className="text-xs text-amber-600 mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 inline-block">
+              Invalid profile ID detected and cleared. Please complete onboarding to get a valid profile.
+            </p>
+          )}
+          <div className="flex items-center gap-3 justify-center">
+            <Link href="/onboarding"
+              className="inline-flex items-center gap-2 bg-indigo-600 text-white font-medium px-5 py-2.5 rounded-full text-sm hover:bg-indigo-700 transition-colors">
+              Complete Onboarding →
+            </Link>
+            <Link href="/dashboard"
+              className="inline-flex items-center gap-2 border border-slate-200 text-slate-600 font-medium px-5 py-2.5 rounded-full text-sm hover:bg-slate-50 transition-colors">
+              Back to Dashboard
+            </Link>
+          </div>
         </div>
       </div>
     )
@@ -1134,7 +1726,7 @@ function WorkspaceContent() {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {/* Back link */}
         <Link
-          href={`/contracts/${contractId}?profile=${profileId}`}
+          href={`/contracts/${contractId}${profileId ? `?profile=${profileId}` : ''}`}
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 mb-6 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" /> Back to Contract
@@ -1243,6 +1835,29 @@ function WorkspaceContent() {
                 workspaceId={workspace.id}
                 onGenerated={handleSectionGenerated}
                 onSaved={handleSectionSaved}
+                rfpRequirements={rfpData?.requirements ?? []}
+              />
+            )}
+          </div>
+        )}
+        {/* ── RFP Intelligence tab ── */}
+        {tab === 'rfp' && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-indigo-500" />
+                RFP Intelligence
+              </h2>
+            </div>
+            {!rfpLoaded ? (
+              <div className="flex items-center justify-center py-20">
+                <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+              </div>
+            ) : (
+              <RFPIntelligencePanel
+                rfpData={rfpData}
+                workspaceId={workspace.id}
+                onUploaded={handleRFPUploaded}
               />
             )}
           </div>

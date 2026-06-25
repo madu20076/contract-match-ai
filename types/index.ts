@@ -175,6 +175,79 @@ export interface ProposalSection {
   updated_at: string
 }
 
+export interface RFPDocument {
+  id: string
+  workspace_id: string
+  file_name: string
+  file_path: string
+  file_size?: number
+  mime_type?: string
+  extracted_text?: string
+  parsed_at?: string
+  created_at: string
+}
+
+export type RFPRequirementType =
+  | 'mandatory'
+  | 'evaluation_factor'
+  | 'deliverable'
+  | 'certification'
+  | 'clin'
+  | 'attachment'
+  | 'date_milestone'
+  | 'technical'
+  | 'management'
+
+export interface RFPRequirement {
+  id: string
+  rfp_document_id: string
+  workspace_id: string
+  requirement_type: RFPRequirementType
+  text: string
+  source_section?: string
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  is_compliant?: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface ComplianceItem {
+  id: string
+  workspace_id: string
+  rfp_requirement_id?: string
+  proposal_section_id?: string
+  section_type?: string
+  requirement_text: string
+  compliance_status: 'compliant' | 'partial' | 'not_addressed' | 'exception'
+  notes?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProposalReadiness {
+  id: string
+  workspace_id: string
+  overall_score: number
+  sections_score: number
+  compliance_score: number
+  completeness_score: number
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+  red_flags: string[]
+  action_items: string[]
+  generated_at: string
+}
+
+export interface RFPAmendment {
+  id: string
+  rfp_document_id: string
+  workspace_id: string
+  amendment_number: string
+  issued_date?: string
+  due_date_change?: string
+  changes: string[]
+  created_at: string
+}
+
 export type Database = {
   public: {
     Tables: {

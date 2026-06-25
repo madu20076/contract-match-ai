@@ -3,12 +3,12 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target, FolderOpen } from 'lucide-react'
+import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target, FolderOpen, Shield, Zap } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import ContractCard from '@/components/ContractCard'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { generateMockMatches, MOCK_CONTRACTS } from '@/lib/mockData'
-import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy, ProposalWorkspace } from '@/types'
+import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy, ProposalWorkspace, ProposalReadiness } from '@/types'
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const PAGE_LOAD_TIME = Date.now()
@@ -221,7 +221,20 @@ function BestOpportunityCard({ item }: { item: BriefWithContract }) {
 
 type WorkspaceWithContract = Omit<ProposalWorkspace, 'contract'> & { contract: Contract | null }
 
-function ActiveWorkspaceRow({ item, profileId }: { item: WorkspaceWithContract; profileId: string }) {
+const RISK_DOT: Record<string, string> = {
+  low:      'bg-emerald-500',
+  medium:   'bg-amber-400',
+  high:     'bg-red-400',
+  critical: 'bg-red-600',
+}
+
+function ActiveWorkspaceRow({
+  item, profileId, readiness,
+}: {
+  item:      WorkspaceWithContract
+  profileId: string
+  readiness: ProposalReadiness | null
+}) {
   const c   = item.contract
   const now = PAGE_LOAD_TIME
   if (!c) return null
@@ -242,6 +255,71 @@ function ActiveWorkspaceRow({ item, profileId }: { item: WorkspaceWithContract; 
         <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
           <span>{c.agency}</span>
           <SourceBadge name={c.source_name} />
+        </p>
+      </div>
+      <div className="shrink-0 text-right">
+        {readiness && (
+          <div className="flex items-center gap-1.5 justify-end mb-0.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${RISK_DOT[readiness.risk_level] ?? 'bg-slate-300'}`} />
+            <span className="text-xs font-bold text-slate-700">{readiness.overall_score}%</span>
+            <span className="text-[10px] text-slate-400">ready</span>
+          </div>
+        )}
+        <p className={`text-xs ${days <= 14 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+          {days <= 0 ? 'Closed' : `${days}d left`}
+        </p>
+      </div>
+      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors shrink-0" />
+    </Link>
+  )
+}
+
+// ── Proposal Readiness widget ─────────────────────────────────
+
+function ReadinessGaugeSmall({ score }: { score: number; riskLevel?: string }) {
+  const color = score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444'
+  return (
+    <div className="relative w-10 h-10 shrink-0">
+      <svg className="w-full h-full -rotate-90" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r="15" fill="none" stroke="#e2e8f0" strokeWidth="5" />
+        <circle cx="20" cy="20" r="15" fill="none"
+          stroke={color} strokeWidth="5"
+          strokeDasharray={`${2 * Math.PI * 15}`}
+          strokeDashoffset={`${2 * Math.PI * 15 * (1 - score / 100)}`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-slate-900">
+        {score}
+      </span>
+    </div>
+  )
+}
+
+function ReadinessRow({
+  item, readiness, profileId,
+}: {
+  item:      WorkspaceWithContract
+  readiness: ProposalReadiness
+  profileId: string
+}) {
+  const c   = item.contract
+  const now = PAGE_LOAD_TIME
+  if (!c) return null
+  const days = Math.ceil((new Date(c.due_date).getTime() - now) / 86_400_000)
+
+  return (
+    <Link
+      href={`/workspace/${c.id}?profile=${profileId}#rfp`}
+      className="flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 transition-colors group"
+    >
+      <ReadinessGaugeSmall score={readiness.overall_score} riskLevel={readiness.risk_level} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
+          {c.title}
+        </p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          {readiness.action_items[0] ?? `${readiness.risk_level} risk`}
         </p>
       </div>
       <div className="shrink-0 text-right">
@@ -311,6 +389,7 @@ function DashboardContent() {
   const [bestBriefs,      setBestBriefs]      = useState<BriefWithContract[]>([])
   const [bestStrategies,    setBestStrategies]    = useState<StrategyWithContract[]>([])
   const [activeWorkspaces,  setActiveWorkspaces]  = useState<WorkspaceWithContract[]>([])
+  const [readinessScores,   setReadinessScores]   = useState<ProposalReadiness[]>([])
   const [loading,         setLoading]         = useState(true)
   const [dataSource,      setDataSource]      = useState<'supabase' | 'mock'>('mock')
 
@@ -364,7 +443,12 @@ function DashboardContent() {
           .eq('status', 'active')
           .order('updated_at', { ascending: false })
           .limit(5),
-      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes, strategiesRes, workspacesRes]) => {
+        supabase
+          .from('proposal_readiness')
+          .select('*')
+          .order('overall_score', { ascending: false })
+          .limit(10),
+      ]).then(([matchesRes, dibbsRes, recentRes, briefsRes, strategiesRes, workspacesRes, readinessRes]) => {
         if (cancelled) return
         if (!matchesRes.error && (matchesRes.data?.length ?? 0) > 0) {
           setTopMatches(matchesRes.data as unknown as ContractMatch[])
@@ -373,6 +457,7 @@ function DashboardContent() {
           setBestBriefs((briefsRes.data ?? []) as unknown as BriefWithContract[])
           setBestStrategies((strategiesRes.data ?? []) as unknown as StrategyWithContract[])
           setActiveWorkspaces((workspacesRes.data ?? []) as unknown as WorkspaceWithContract[])
+          setReadinessScores((readinessRes?.data ?? []) as unknown as ProposalReadiness[])
           setDataSource('supabase')
           setLoading(false)
           return
@@ -497,12 +582,51 @@ function DashboardContent() {
               count={activeWorkspaces.length}
             >
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                {activeWorkspaces.map((item) => (
-                  <ActiveWorkspaceRow key={item.id} item={item} profileId={profileId} />
-                ))}
+                {activeWorkspaces.map((item) => {
+                  const readiness = readinessScores.find(r => r.workspace_id === item.id) ?? null
+                  return (
+                    <ActiveWorkspaceRow key={item.id} item={item} profileId={profileId} readiness={readiness} />
+                  )
+                })}
               </div>
             </Section>
           )}
+
+          {/* ── Section 1e: Proposal Readiness ── */}
+          {!isDemo && readinessScores.length > 0 && (() => {
+            const readinessWithWorkspace = readinessScores
+              .map(r => ({ readiness: r, workspace: activeWorkspaces.find(w => w.id === r.workspace_id) }))
+              .filter(({ workspace }) => workspace != null) as Array<{ readiness: ProposalReadiness; workspace: WorkspaceWithContract }>
+            if (readinessWithWorkspace.length === 0) return null
+            return (
+              <Section
+                title="Proposal Readiness"
+                subtitle="RFP compliance and preparation status across active proposals"
+              >
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+                  <div className="flex items-center gap-4 px-5 py-3 bg-slate-50 border-b border-slate-100">
+                    <Zap className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <div className="flex items-center gap-6 text-xs text-slate-500">
+                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Low risk (80+%)</span>
+                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> Medium (60–79%)</span>
+                      <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500" /> High risk (&lt;60%)</span>
+                    </div>
+                    <Link href="/workspace" className="ml-auto text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                      <Shield className="w-3 h-3" /> Upload RFP →
+                    </Link>
+                  </div>
+                  {readinessWithWorkspace.map(({ readiness, workspace }) => (
+                    <ReadinessRow
+                      key={readiness.id}
+                      item={workspace}
+                      readiness={readiness}
+                      profileId={profileId}
+                    />
+                  ))}
+                </div>
+              </Section>
+            )
+          })()}
 
           {/* ── Section 2: DIBBS Opportunities ── */}
           {dibbsContracts.length > 0 && (

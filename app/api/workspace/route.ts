@@ -5,6 +5,8 @@ import type { Contract, ProposalStrategy, ProposalWorkspace, ProposalTask, Propo
 
 export const dynamic = 'force-dynamic'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 // POST /api/workspace
 // Body: { contract_id, business_profile_id }
 // Creates the workspace if it doesn't exist, then returns full workspace data
@@ -20,6 +22,13 @@ export async function POST(req: NextRequest) {
   if (!contract_id || !business_profile_id) {
     return NextResponse.json(
       { error: 'contract_id and business_profile_id are required' },
+      { status: 400 },
+    )
+  }
+
+  if (!UUID_RE.test(contract_id) || !UUID_RE.test(business_profile_id)) {
+    return NextResponse.json(
+      { error: 'contract_id and business_profile_id must be valid UUIDs' },
       { status: 400 },
     )
   }
@@ -122,6 +131,10 @@ export async function GET(req: NextRequest) {
 
   if (!contractId || !profileId) {
     return NextResponse.json({ error: 'contract_id and profile_id are required' }, { status: 400 })
+  }
+
+  if (!UUID_RE.test(contractId) || !UUID_RE.test(profileId)) {
+    return NextResponse.json({ error: 'contract_id and profile_id must be valid UUIDs' }, { status: 400 })
   }
 
   const db = supabaseServer

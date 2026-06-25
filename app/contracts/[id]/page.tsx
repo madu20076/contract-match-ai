@@ -76,6 +76,9 @@ function ScoreBadge({ value, label, icon: Icon }: { value: number; label: string
   )
 }
 
+// Module-scope UUID validator — rejects 'demo', 'mock-...', 'YOUR_PROFILE_ID', etc.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 const RISK_STYLE  = { low: 'bg-emerald-50 text-emerald-700 border-emerald-200', medium: 'bg-amber-50 text-amber-700 border-amber-200', high: 'bg-red-50 text-red-700 border-red-200' } as const
 const EFFORT_STYLE = { low: 'bg-emerald-50 text-emerald-700 border-emerald-200', medium: 'bg-amber-50 text-amber-700 border-amber-200', high: 'bg-orange-50 text-orange-700 border-orange-200', very_high: 'bg-red-50 text-red-700 border-red-200' } as const
 const EFFORT_LABEL = { low: 'Low Effort', medium: 'Medium Effort', high: 'High Effort', very_high: 'Very High Effort' } as const
@@ -566,12 +569,19 @@ function ContractDetailContent() {
   const [strategyLoading, setStrategyLoading] = useState(false)
   const [strategyErr,    setStrategyErr]    = useState<string | null>(null)
 
-  const profileId =
+  const rawProfile =
     searchParams.get('profile') ??
     (typeof window !== 'undefined' ? localStorage.getItem('cmai_profile_id') : null) ??
-    'demo'
+    ''
 
-  const hasProfile = !!(profileId && profileId !== 'demo')
+  const profileId: string | null = UUID_RE.test(rawProfile) ? rawProfile : null
+
+  // Evict stale non-UUID values so they don't persist across sessions
+  if (typeof window !== 'undefined' && rawProfile && !UUID_RE.test(rawProfile)) {
+    localStorage.removeItem('cmai_profile_id')
+  }
+
+  const hasProfile = profileId !== null
 
   // Load contract + existing analysis on mount
   useEffect(() => {
@@ -593,7 +603,7 @@ function ContractDetailContent() {
             .maybeSingle()
           if (briefRes.data) setBrief(briefRes.data as OpportunityBrief)
 
-          if (profileId && profileId !== 'demo') {
+          if (profileId) {
             const [matchRes, analysisRes, stratRes] = await Promise.all([
               supabase.from('contract_matches').select('*')
                 .eq('contract_id', id).eq('business_profile_id', profileId).maybeSingle(),
@@ -615,7 +625,7 @@ function ContractDetailContent() {
 
       // Mock fallback
       const mc = getMockContractById(id)
-      const mm = getMockMatchByContractId(id, profileId)
+      const mm = getMockMatchByContractId(id, profileId ?? '')
       setContract(mc ?? null)
       setMatch(mm ?? null)
       setLoading(false)
@@ -635,7 +645,7 @@ function ContractDetailContent() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           contract_id:         contract.id,
-          business_profile_id: profileId !== 'demo' ? profileId : undefined,
+          business_profile_id: profileId ?? undefined,
           refresh,
         }),
       })
@@ -664,7 +674,7 @@ function ContractDetailContent() {
   }, [contract, profileId])
 
   const generateStrategy = useCallback(async (refresh = false) => {
-    if (!contract || !profileId || profileId === 'demo') return
+    if (!contract || !profileId) return
     setStrategyLoading(true)
     setStrategyErr(null)
 
@@ -775,7 +785,7 @@ function ContractDetailContent() {
               {/* Workspace button */}
               {hasProfile && (
                 <Link
-                  href={`/workspace/${id}?profile=${profileId}`}
+                  href={`/workspace/${id}${profileId ? `?profile=${profileId}` : ''}`}
                   className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shadow-sm"
                 >
                   <FolderOpen className="w-4 h-4" />
