@@ -152,6 +152,29 @@ export interface ProposalNote {
   updated_at: string
 }
 
+export type SectionType =
+  | 'executive_summary'
+  | 'technical_approach'
+  | 'management_plan'
+  | 'staffing_plan'
+  | 'quality_control'
+  | 'past_performance'
+  | 'pricing_narrative'
+  | 'cover_letter'
+  | 'compliance_matrix'
+
+export interface ProposalSection {
+  id: string
+  workspace_id: string
+  section_type: SectionType
+  title: string
+  content: string
+  status: 'draft' | 'review' | 'final'
+  generated_by: string
+  created_at: string
+  updated_at: string
+}
+
 export type Database = {
   public: {
     Tables: {

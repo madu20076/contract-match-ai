@@ -4,20 +4,23 @@ import { useEffect, useState, useCallback, Suspense, useRef } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
-  ArrowLeft, CheckCircle2, Circle, Clock, FileText, MessageSquare,
+  ArrowLeft, BookOpen, CheckCircle2, Circle, Clock, Copy, FileText, MessageSquare,
   RefreshCw, Upload, Trash2, Sparkles, ChevronDown, ChevronUp,
   Target, TrendingUp, AlertCircle, Plus, Save, Building2,
   CheckSquare, LayoutDashboard, FolderOpen,
 } from 'lucide-react'
 import Navbar from '@/components/Navbar'
-import type { ProposalWorkspace, ProposalTask, ProposalDocument, ProposalNote, Contract } from '@/types'
+import type {
+  ProposalWorkspace, ProposalTask, ProposalDocument, ProposalNote,
+  ProposalSection, SectionType, Contract,
+} from '@/types'
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const WORKSPACE_LOAD_TIME = Date.now()
 
 // ── Types ─────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'tasks' | 'documents' | 'notes'
+type Tab = 'overview' | 'tasks' | 'documents' | 'notes' | 'sections'
 
 interface WorkspaceData {
   workspace:  ProposalWorkspace
@@ -543,6 +546,281 @@ function NotesPanel({
   )
 }
 
+// ── Proposal Sections ─────────────────────────────────────────
+
+const SECTION_TYPES: ReadonlyArray<{ type: SectionType; label: string; description: string }> = [
+  { type: 'executive_summary',  label: 'Executive Summary',  description: 'Company overview, value proposition, and proposal summary' },
+  { type: 'technical_approach', label: 'Technical Approach', description: 'Methodology, phases, tools, and technical solution details' },
+  { type: 'management_plan',    label: 'Management Plan',    description: 'Organizational structure and project management approach' },
+  { type: 'staffing_plan',      label: 'Staffing Plan',      description: 'Key personnel, roles, qualifications, and org chart' },
+  { type: 'quality_control',    label: 'Quality Control',    description: 'QA/QC processes, performance standards, and metrics' },
+  { type: 'past_performance',   label: 'Past Performance',   description: 'Three relevant contract references with quantified outcomes' },
+  { type: 'pricing_narrative',  label: 'Pricing Narrative',  description: 'Cost basis, labor rates, and value-for-money explanation' },
+  { type: 'cover_letter',       label: 'Cover Letter',       description: 'Formal transmittal letter to the contracting officer' },
+  { type: 'compliance_matrix',  label: 'Compliance Matrix',  description: 'Section-by-section RFP requirement compliance checklist' },
+]
+
+function SectionTypeButton({
+  label, description, isSelected, hasContent, onClick,
+}: {
+  sectionType:  SectionType
+  label:        string
+  description:  string
+  isSelected:   boolean
+  hasContent:   boolean
+  onClick:      () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-4 py-3.5 rounded-xl border transition-all ${
+        isSelected
+          ? 'border-indigo-400 bg-indigo-50 shadow-sm'
+          : 'border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+          hasContent
+            ? 'border-emerald-500 bg-emerald-500'
+            : isSelected
+              ? 'border-indigo-400 bg-indigo-100'
+              : 'border-slate-300 bg-white'
+        }`}>
+          {hasContent && (
+            <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
+              <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-semibold leading-tight ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>
+            {label}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5 leading-snug">{description}</p>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+function SectionEditor({
+  section, workspaceId, onSaved, onRegenerate, regenerating, regenError,
+}: {
+  section:      ProposalSection
+  workspaceId:  string
+  onSaved:      (s: ProposalSection) => void
+  onRegenerate: () => void
+  regenerating: boolean
+  regenError:   string | null
+}) {
+  const [content, setContent] = useState(section.content)
+  const [saving,  setSaving]  = useState(false)
+  const [saved,   setSaved]   = useState(false)
+  const [copied,  setCopied]  = useState(false)
+
+  function handleSave() {
+    setSaving(true)
+    setSaved(false)
+    fetch(`/api/workspace/${workspaceId}/sections`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ section_id: section.id, content }),
+    })
+      .then(r => r.json())
+      .then((data: { section?: ProposalSection; error?: string }) => {
+        if (data.section) { onSaved(data.section); setSaved(true) }
+        setSaving(false)
+      })
+      .catch(() => setSaving(false))
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => undefined)
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${
+            section.generated_by === 'template'
+              ? 'bg-slate-100 text-slate-500 border-slate-200'
+              : 'bg-indigo-50 text-indigo-600 border-indigo-200'
+          }`}>
+            {section.generated_by === 'template' ? 'Template' : 'AI Generated'}
+          </span>
+          <span className="text-xs text-slate-400">
+            {section.status === 'draft' ? 'Draft' : section.status === 'review' ? 'In Review' : 'Final'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRegenerate}
+            disabled={regenerating}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600 disabled:opacity-50 transition-colors"
+          >
+            {regenerating
+              ? <RefreshCw className="w-3 h-3 animate-spin" />
+              : <Sparkles className="w-3 h-3" />
+            }
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-800 transition-colors"
+          >
+            <Copy className="w-3 h-3" />
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-medium transition-colors"
+          >
+            {saving ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            {saving ? 'Saving…' : saved ? 'Saved!' : 'Save'}
+          </button>
+        </div>
+      </div>
+      {regenError && (
+        <div className="px-5 py-2.5 bg-red-50 border-b border-red-100">
+          <p className="text-xs text-red-600">{regenError}</p>
+        </div>
+      )}
+      {/* Editable content */}
+      <textarea
+        value={content}
+        onChange={e => setContent(e.target.value)}
+        className="w-full min-h-[560px] p-5 text-sm text-slate-700 leading-relaxed font-mono resize-none border-none outline-none"
+        placeholder="Section content will appear here after generation…"
+      />
+    </div>
+  )
+}
+
+function SectionsPanel({
+  sections, workspaceId, onGenerated, onSaved,
+}: {
+  sections:    ProposalSection[]
+  workspaceId: string
+  onGenerated: (s: ProposalSection) => void
+  onSaved:     (s: ProposalSection) => void
+}) {
+  const [selectedType, setSelectedType] = useState<SectionType | null>(null)
+  const [generating,   setGenerating]   = useState(false)
+  const [genError,     setGenError]     = useState<string | null>(null)
+
+  const selectedSection = selectedType
+    ? sections.find(s => s.section_type === selectedType)
+    : undefined
+
+  function handleGenerate(stype: SectionType, refresh: boolean) {
+    setGenerating(true)
+    setGenError(null)
+    fetch(`/api/workspace/${workspaceId}/sections`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ section_type: stype, refresh }),
+    })
+      .then(r => r.json())
+      .then((data: { section?: ProposalSection; error?: string }) => {
+        if (data.error) { setGenError(data.error); setGenerating(false); return }
+        if (data.section) { onGenerated(data.section) }
+        setGenerating(false)
+      })
+      .catch((err: unknown) => {
+        setGenError(err instanceof Error ? err.message : 'Generation failed')
+        setGenerating(false)
+      })
+  }
+
+  const doneSections = sections.length
+  const totalTypes   = SECTION_TYPES.length
+
+  return (
+    <div className="grid lg:grid-cols-[280px_1fr] gap-6 items-start">
+      {/* Left column — section type buttons */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sections</p>
+          <span className="text-xs text-slate-400">{doneSections}/{totalTypes} generated</span>
+        </div>
+        {SECTION_TYPES.map(({ type, label, description }) => (
+          <SectionTypeButton
+            key={type}
+            sectionType={type}
+            label={label}
+            description={description}
+            isSelected={selectedType === type}
+            hasContent={sections.some(s => s.section_type === type)}
+            onClick={() => { setSelectedType(type); setGenError(null) }}
+          />
+        ))}
+      </div>
+
+      {/* Right column — editor or prompt */}
+      <div>
+        {!selectedType && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center">
+            <BookOpen className="w-12 h-12 text-indigo-200 mx-auto mb-4" />
+            <h3 className="text-base font-bold text-slate-700 mb-2">Select a section to get started</h3>
+            <p className="text-sm text-slate-400 max-w-sm mx-auto">
+              Click any section on the left to generate AI-written content. Each section can be edited, saved, and regenerated.
+            </p>
+          </div>
+        )}
+
+        {selectedType && !selectedSection && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center">
+            <BookOpen className="w-10 h-10 text-indigo-300 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-slate-800 mb-1">
+              {SECTION_TYPES.find(s => s.type === selectedType)?.label}
+            </h3>
+            <p className="text-sm text-slate-400 mb-6 max-w-sm mx-auto">
+              {SECTION_TYPES.find(s => s.type === selectedType)?.description}
+            </p>
+            {genError && (
+              <p className="text-xs text-red-500 mb-4">{genError}</p>
+            )}
+            <button
+              onClick={() => handleGenerate(selectedType, false)}
+              disabled={generating}
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-medium px-6 py-2.5 rounded-xl transition-colors"
+            >
+              {generating
+                ? <><RefreshCw className="w-4 h-4 animate-spin" /> Generating…</>
+                : <><Sparkles className="w-4 h-4" /> Generate Section</>
+              }
+            </button>
+            <p className="text-xs text-slate-400 mt-3">
+              {process.env.NEXT_PUBLIC_ANTHROPIC_ENABLED === 'true'
+                ? 'Powered by Claude AI'
+                : 'Using professional template (add Anthropic API key for AI generation)'}
+            </p>
+          </div>
+        )}
+
+        {selectedType && selectedSection && (
+          <SectionEditor
+            key={`${selectedSection.id}-${selectedSection.updated_at}`}
+            section={selectedSection}
+            workspaceId={workspaceId}
+            onSaved={onSaved}
+            onRegenerate={() => handleGenerate(selectedType, true)}
+            regenerating={generating}
+            regenError={genError}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── WorkspaceHeader ───────────────────────────────────────────
 
 function WorkspaceHeader({
@@ -565,6 +843,7 @@ function WorkspaceHeader({
     { key: 'tasks',      label: 'Tasks',      icon: CheckSquare     },
     { key: 'documents',  label: 'Documents',  icon: FolderOpen      },
     { key: 'notes',      label: 'Notes',      icon: MessageSquare   },
+    { key: 'sections',   label: 'Sections',   icon: BookOpen        },
   ]
 
   const progressColor =
@@ -655,11 +934,13 @@ function WorkspaceContent() {
     (typeof window !== 'undefined' ? localStorage.getItem('cmai_profile_id') : null) ??
     'demo'
 
-  const [data,      setData]      = useState<WorkspaceData | null>(null)
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState<string | null>(null)
-  const [tab,       setTab]       = useState<Tab>('overview')
-  const [tick,      setTick]      = useState(0)
+  const [data,          setData]          = useState<WorkspaceData | null>(null)
+  const [loading,       setLoading]       = useState(true)
+  const [error,         setError]         = useState<string | null>(null)
+  const [tab,           setTab]           = useState<Tab>('overview')
+  const [tick,          setTick]          = useState(0)
+  const [sections,      setSections]      = useState<ProposalSection[]>([])
+  const [sectionsLoaded, setSectionsLoaded] = useState(false)
 
   // Auto-create or load workspace on mount
   useEffect(() => {
@@ -709,6 +990,37 @@ function WorkspaceContent() {
 
     return () => { cancelled = true }
   }, [contractId, profileId, tick])
+
+  // Lazy-load sections when the Sections tab is first opened
+  useEffect(() => {
+    let cancelled = false
+    if (tab !== 'sections' || sectionsLoaded || !data) {
+      return () => { cancelled = true }
+    }
+    fetch(`/api/workspace/${data.workspace.id}/sections`)
+      .then(r => r.json())
+      .then((res: { sections?: ProposalSection[] }) => {
+        if (cancelled) return
+        setSections(res.sections ?? [])
+        setSectionsLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) setSectionsLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [tab, sectionsLoaded, data])
+
+  const handleSectionGenerated = useCallback((section: ProposalSection) => {
+    setSections(prev => {
+      const exists = prev.find(s => s.section_type === section.section_type)
+      if (exists) return prev.map(s => s.section_type === section.section_type ? section : s)
+      return [...prev, section]
+    })
+  }, [])
+
+  const handleSectionSaved = useCallback((section: ProposalSection) => {
+    setSections(prev => prev.map(s => s.id === section.id ? section : s))
+  }, [])
 
   const updateTask = useCallback((taskId: string, status: ProposalTask['status']) => {
     if (!data) return
@@ -904,6 +1216,35 @@ function WorkspaceContent() {
               workspaceId={workspace.id}
               onSaved={handleNoteSaved}
             />
+          </div>
+        )}
+
+        {/* ── Sections tab ── */}
+        {tab === 'sections' && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-indigo-500" />
+                Proposal Sections
+                {sections.length > 0 && (
+                  <span className="text-sm font-normal text-slate-400">
+                    {sections.length} of {SECTION_TYPES.length} generated
+                  </span>
+                )}
+              </h2>
+            </div>
+            {!sectionsLoaded ? (
+              <div className="flex items-center justify-center py-20">
+                <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
+              </div>
+            ) : (
+              <SectionsPanel
+                sections={sections}
+                workspaceId={workspace.id}
+                onGenerated={handleSectionGenerated}
+                onSaved={handleSectionSaved}
+              />
+            )}
           </div>
         )}
       </div>
