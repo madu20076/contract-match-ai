@@ -86,6 +86,24 @@ export default function OnboardingPage() {
   const [submitError, setSubmitError] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [redirectTarget, setRedirectTarget] = useState('')
+  const [userId, setUserId] = useState<string | null>(null)
+  const [authChecked, setAuthChecked] = useState(!isSupabaseConfigured)
+
+  // Require auth — redirect to login if not logged in
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        const user = data.session?.user ?? null
+        if (!user) {
+          router.push('/login?next=/onboarding')
+          return
+        }
+        setUserId(user.id)
+        setAuthChecked(true)
+      })
+      .catch(() => setAuthChecked(true))
+  }, [router])
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -169,11 +187,15 @@ export default function OnboardingPage() {
   }
 
   function next() {
-    if (validateStep(step)) setStep((s) => (s < 3 ? ((s + 1) as Step) : s))
+    if (!validateStep(step)) return
+    if (step === 1) setStep(2)
+    else if (step === 2) setStep(3)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // Guard: only the final step may submit — pressing Enter on earlier steps must not submit
+    if (step !== 3) return
     if (!validateStep(3)) return
     setSubmitting(true)
     setSubmitError('')
@@ -181,7 +203,7 @@ export default function OnboardingPage() {
     let profileId = `mock-${Date.now()}`
 
     if (isSupabaseConfigured && supabase) {
-      const payload = {
+      const payload: Record<string, unknown> = {
         business_name:              form.business_name,
         industry:                   form.industry,
         naics_codes:                form.naics_codes,
@@ -196,6 +218,7 @@ export default function OnboardingPage() {
         past_government_experience: form.past_government_experience,
         email:                      form.email,
       }
+      if (userId) payload.user_id = userId
 
       const { data, error } = await supabase
         .from('business_profiles')
@@ -243,6 +266,15 @@ export default function OnboardingPage() {
   }, [submitted, redirectTarget, router])
 
   const stepLabels = ['Business Info', 'Location & Certs', 'Experience & Review']
+
+  // ── Auth loading ─────────────────────────────────────────────
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   // ── Success screen ───────────────────────────────────────────
   if (submitted) {

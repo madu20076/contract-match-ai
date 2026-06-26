@@ -1,5 +1,15 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ArrowRight, CheckCircle2, Search, Zap, Shield } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ArrowRight, CheckCircle2, Search, Zap, Shield, Loader2, LogOut } from 'lucide-react'
+import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { signOutUser } from '@/lib/auth'
+
+const CURRENT_YEAR = new Date().getFullYear()
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const features = [
   {
@@ -32,7 +42,79 @@ const stats = [
   { value: '$0', label: 'Free to start' },
 ]
 
+type CtaState = 'loading' | 'unauthenticated' | 'no_profile' | 'has_profile'
+
 export default function HomePage() {
+  const router = useRouter()
+  const [ctaState, setCtaState] = useState<CtaState>('loading')
+  const [profileId, setProfileId] = useState<string | null>(null)
+  const [ctaLoading, setCtaLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      Promise.resolve().then(() => setCtaState('unauthenticated'))
+      return
+    }
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        const user = data.session?.user
+        if (!user) {
+          setCtaState('unauthenticated')
+          return
+        }
+        return supabase!
+          .from('business_profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle()
+          .then(({ data: p }) => {
+            const pid = (p as { id: string } | null)?.id ?? null
+            if (pid && UUID_RE.test(pid)) {
+              setProfileId(pid)
+              setCtaState('has_profile')
+            } else {
+              setCtaState('no_profile')
+            }
+          })
+      })
+      .catch(() => setCtaState('unauthenticated'))
+  }, [])
+
+  async function handleCtaClick() {
+    if (ctaState === 'loading') return
+    if (ctaState === 'unauthenticated') { router.push('/signup'); return }
+    if (ctaState === 'no_profile') { router.push('/onboarding'); return }
+
+    // has_profile: regenerate matches then go to dashboard
+    setCtaLoading(true)
+    try {
+      await fetch('/api/matches/generate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ profile_id: profileId }),
+      })
+    } finally {
+      setCtaLoading(false)
+      router.push('/dashboard')
+    }
+  }
+
+  async function handleLogout() {
+    await signOutUser()
+    setCtaState('unauthenticated')
+    setProfileId(null)
+  }
+
+  const ctaLabel =
+    ctaState === 'loading'      ? 'Loading…'
+    : ctaState === 'has_profile' ? 'View My Matches'
+    : ctaState === 'no_profile'  ? 'Complete Your Profile'
+    : 'Start Free'
+
+  const ctaDisabled = ctaState === 'loading' || ctaLoading
+
   return (
     <div className="flex flex-col min-h-screen">
       {/* Navbar */}
@@ -44,16 +126,35 @@ export default function HomePage() {
             </div>
             <span className="font-semibold text-white text-lg">Contract Match AI</span>
           </div>
-          <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="text-sm text-slate-400 hover:text-white transition-colors">
-              Dashboard
-            </Link>
-            <Link
-              href="/onboarding"
-              className="text-sm font-medium bg-indigo-500 hover:bg-indigo-400 text-white px-4 py-2 rounded-full transition-colors"
-            >
-              Start Free
-            </Link>
+          <div className="flex items-center gap-4">
+            {ctaState === 'has_profile' || ctaState === 'no_profile' ? (
+              <>
+                <Link href="/dashboard" className="text-sm text-slate-400 hover:text-white transition-colors">
+                  Dashboard
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-white transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Log out
+                </button>
+              </>
+            ) : ctaState === 'unauthenticated' ? (
+              <>
+                <Link href="/login" className="text-sm text-slate-400 hover:text-white transition-colors">
+                  Log in
+                </Link>
+                <Link
+                  href="/signup"
+                  className="text-sm font-medium bg-indigo-500 hover:bg-indigo-400 text-white px-4 py-2 rounded-full transition-colors"
+                >
+                  Sign up free
+                </Link>
+              </>
+            ) : (
+              <div className="w-24 h-8 bg-slate-700 rounded-full animate-pulse" />
+            )}
           </div>
         </div>
       </nav>
@@ -74,13 +175,14 @@ export default function HomePage() {
             and surfaces only the government contracts you&apos;re best positioned to win.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
-              href="/onboarding"
-              className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-400 text-white font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg shadow-indigo-500/30"
+            <button
+              onClick={handleCtaClick}
+              disabled={ctaDisabled}
+              className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-60 text-white font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg shadow-indigo-500/30"
             >
-              Start Free
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+              {ctaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+              {ctaLabel}
+            </button>
             <Link
               href="/dashboard"
               className="flex items-center gap-2 border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-white font-medium px-8 py-4 rounded-full text-base transition-colors"
@@ -164,20 +266,21 @@ export default function HomePage() {
           <p className="text-indigo-200 text-lg mb-8">
             Create your free business profile in under 3 minutes and get matched with live opportunities today.
           </p>
-          <Link
-            href="/onboarding"
-            className="inline-flex items-center gap-2 bg-white text-indigo-600 hover:bg-indigo-50 font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg"
+          <button
+            onClick={handleCtaClick}
+            disabled={ctaDisabled}
+            className="inline-flex items-center gap-2 bg-white text-indigo-600 hover:bg-indigo-50 disabled:opacity-60 font-semibold px-8 py-4 rounded-full text-base transition-colors shadow-lg"
           >
-            Start Free — No Credit Card Needed
-            <ArrowRight className="w-4 h-4" />
-          </Link>
+            {ctaLoading ? <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> : <ArrowRight className="w-4 h-4" />}
+            {ctaState === 'has_profile' ? 'View My Matches' : 'Start Free — No Credit Card Needed'}
+          </button>
         </div>
       </section>
 
       {/* Footer */}
       <footer className="bg-slate-900 py-10 px-4 text-center">
         <p className="text-slate-500 text-sm">
-          © {new Date().getFullYear()} Contract Match AI. Built for small businesses competing in government procurement.
+          &copy; {CURRENT_YEAR} Contract Match AI. Built for small businesses competing in government procurement.
         </p>
       </footer>
     </div>

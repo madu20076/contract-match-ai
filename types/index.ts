@@ -1,5 +1,6 @@
 export interface BusinessProfile {
   id?: string
+  user_id?: string
   business_name: string
   industry: string
   naics_codes: string[]

@@ -3,7 +3,7 @@
 import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target, FolderOpen, Shield, Zap } from 'lucide-react'
+import { RefreshCw, AlertCircle, ChevronRight, MapPin, Clock, Building2, TrendingUp, Target, FolderOpen, Shield, Zap, Sparkles } from 'lucide-react'
 import Navbar from '@/components/Navbar'
 import ContractCard from '@/components/ContractCard'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
@@ -12,6 +12,8 @@ import type { ContractMatch, Contract, OpportunityBrief, ProposalStrategy, Propo
 
 // Evaluated once at module load — avoids calling Date.now() during render
 const PAGE_LOAD_TIME = Date.now()
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // ── Source badge ─────────────────────────────────────────────
 
@@ -390,22 +392,98 @@ function DashboardContent() {
   const [bestStrategies,    setBestStrategies]    = useState<StrategyWithContract[]>([])
   const [activeWorkspaces,  setActiveWorkspaces]  = useState<WorkspaceWithContract[]>([])
   const [readinessScores,   setReadinessScores]   = useState<ProposalReadiness[]>([])
-  const [loading,         setLoading]         = useState(true)
-  const [dataSource,      setDataSource]      = useState<'supabase' | 'mock'>('mock')
+  const [loading,          setLoading]          = useState(true)
+  const [dataSource,       setDataSource]       = useState<'supabase' | 'mock'>('mock')
+  const [profileId,        setProfileId]        = useState<string | null>(null)
+  const [profileResolved,  setProfileResolved]  = useState(false)
+  const [matchesGenerating, setMatchesGenerating] = useState(false)
+  const [matchMsg,         setMatchMsg]         = useState<string | null>(null)
 
-  const profileId =
-    searchParams.get('profile') ??
-    (typeof window !== 'undefined' ? localStorage.getItem('cmai_profile_id') : null) ??
-    'demo'
-
-  const isDemo = !profileId || profileId.startsWith('mock-') || profileId === 'demo'
+  const isDemo = profileResolved && !profileId
 
   const [tick, setTick] = useState(0)
 
+  // Resolve profile from: URL param → auth session → localStorage
   useEffect(() => {
     let cancelled = false
 
-    if (isSupabaseConfigured && supabase && !isDemo) {
+    const fromSearch  = searchParams.get('profile')
+    const fromStorage = typeof window !== 'undefined' ? localStorage.getItem('cmai_profile_id') : null
+    const quick =
+      UUID_RE.test(fromSearch  ?? '') ? fromSearch!  :
+      UUID_RE.test(fromStorage ?? '') ? fromStorage! :
+      null
+
+    if (quick || !isSupabaseConfigured || !supabase) {
+      Promise.resolve().then(() => {
+        if (cancelled) return
+        setProfileId(quick)
+        setProfileResolved(true)
+      })
+      return () => { cancelled = true }
+    }
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        const user = data.session?.user
+        if (!user) {
+          if (!cancelled) { setProfileId(null); setProfileResolved(true) }
+          return
+        }
+        return supabase!
+          .from('business_profiles')
+          .select('id')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+          .then(({ data: p }) => {
+            if (cancelled) return
+            const pid = (p as { id: string } | null)?.id ?? null
+            if (pid && UUID_RE.test(pid)) {
+              if (typeof window !== 'undefined') localStorage.setItem('cmai_profile_id', pid)
+              setProfileId(pid)
+            } else {
+              setProfileId(null)
+            }
+            setProfileResolved(true)
+          })
+      })
+      .catch(() => { if (!cancelled) { setProfileId(null); setProfileResolved(true) } })
+
+    return () => { cancelled = true }
+  }, [searchParams])
+
+  async function refreshMatches() {
+    if (!profileId) return
+    setMatchesGenerating(true)
+    setMatchMsg(null)
+    try {
+      const res  = await fetch('/api/matches/generate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ profile_id: profileId }),
+      })
+      const data = await res.json() as { success?: boolean; match_count?: number; error?: string }
+      if (data.success) {
+        setMatchMsg(`Matches refreshed — ${data.match_count ?? 0} opportunities found.`)
+        setLoading(true)
+        setTick((t) => t + 1)
+      } else {
+        setMatchMsg(data.error ?? 'Failed to refresh matches.')
+      }
+    } catch {
+      setMatchMsg('Network error refreshing matches.')
+    } finally {
+      setMatchesGenerating(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!profileResolved) return () => {}
+    let cancelled = false
+
+    if (isSupabaseConfigured && supabase && profileId) {
       Promise.all([
         supabase
           .from('contract_matches')
@@ -463,7 +541,7 @@ function DashboardContent() {
           return
         }
         // Fall through to mock if no matches
-        const mockMatches = generateMockMatches(profileId)
+        const mockMatches = generateMockMatches(profileId ?? 'demo')
         setTopMatches(mockMatches)
         setDibbsContracts(MOCK_CONTRACTS.filter((c) => c.source_name === 'DIBBS'))
         setRecentContracts(MOCK_CONTRACTS.filter((c) => c.source_name !== 'DIBBS').slice(0, 6))
@@ -474,7 +552,7 @@ function DashboardContent() {
       // Async boundary so setState calls are in .then() — not synchronous in effect
       Promise.resolve().then(() => {
         if (cancelled) return
-        setTopMatches(generateMockMatches(profileId))
+        setTopMatches(generateMockMatches(profileId ?? 'demo'))
         setDibbsContracts(MOCK_CONTRACTS.filter((c) => c.source_name === 'DIBBS'))
         setRecentContracts(MOCK_CONTRACTS.filter((c) => c.source_name !== 'DIBBS').slice(0, 6))
         setDataSource('mock')
@@ -483,30 +561,47 @@ function DashboardContent() {
     }
 
     return () => { cancelled = true }
-  }, [profileId, isDemo, tick])
+  }, [profileId, profileResolved, tick])
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
 
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Contract Dashboard</h1>
           <p className="text-slate-500 text-sm mt-1">
             {dataSource === 'mock' ? (
-              <>Demo data — <Link href="/onboarding" className="text-indigo-600 hover:underline">create your profile</Link> for personalized matches.</>
+              <>Demo data — <Link href="/signup" className="text-indigo-600 hover:underline">sign up</Link> or <Link href="/login" className="text-indigo-600 hover:underline">log in</Link> for personalized matches.</>
             ) : (
-              `Live matches from your business profile`
+              'Live matches from your business profile'
             )}
           </p>
+          {matchMsg && (
+            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 mt-2 inline-block">
+              {matchMsg}
+            </p>
+          )}
         </div>
-        <button
-          onClick={() => { setLoading(true); setTick(t => t + 1) }}
-          disabled={loading}
-          className="flex items-center gap-1.5 self-start text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 hover:text-slate-900 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
+        <div className="flex items-center gap-2 self-start shrink-0">
+          {profileId && (
+            <button
+              onClick={refreshMatches}
+              disabled={matchesGenerating || loading}
+              className="flex items-center gap-1.5 text-sm border border-indigo-200 rounded-lg px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+            >
+              <Sparkles className={`w-4 h-4 ${matchesGenerating ? 'animate-pulse' : ''}`} />
+              {matchesGenerating ? 'Refreshing…' : 'Refresh Matches'}
+            </button>
+          )}
+          <button
+            onClick={() => { setLoading(true); setTick((t) => t + 1) }}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 hover:text-slate-900 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -521,12 +616,12 @@ function DashboardContent() {
             title="Recommended Matches"
             subtitle="Scored by NAICS, FSC, certifications, and experience"
             count={topMatches.length}
-            href="/onboarding"
-            hrefLabel={dataSource === 'mock' ? 'Build profile →' : undefined}
+            href={dataSource === 'mock' ? '/signup' : undefined}
+            hrefLabel={dataSource === 'mock' ? 'Sign up →' : undefined}
           >
             {topMatches.length === 0 ? (
               <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center">
-                <p className="text-slate-500 text-sm">No matches yet. <Link href="/onboarding" className="text-indigo-600 hover:underline">Create your profile</Link> to get started.</p>
+                <p className="text-slate-500 text-sm">No matches yet. <Link href="/signup" className="text-indigo-600 hover:underline">Create your account</Link> to get started.</p>
               </div>
             ) : (
               <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
@@ -585,7 +680,7 @@ function DashboardContent() {
                 {activeWorkspaces.map((item) => {
                   const readiness = readinessScores.find(r => r.workspace_id === item.id) ?? null
                   return (
-                    <ActiveWorkspaceRow key={item.id} item={item} profileId={profileId} readiness={readiness} />
+                    <ActiveWorkspaceRow key={item.id} item={item} profileId={profileId ?? ''} readiness={readiness} />
                   )
                 })}
               </div>
@@ -620,7 +715,7 @@ function DashboardContent() {
                       key={readiness.id}
                       item={workspace}
                       readiness={readiness}
-                      profileId={profileId}
+                      profileId={profileId ?? ''}
                     />
                   ))}
                 </div>
@@ -667,9 +762,12 @@ function DashboardContent() {
           <span>
             <strong>Demo mode:</strong>{' '}
             {isSupabaseConfigured
-              ? 'Connect a business profile to see AI-matched contracts.'
+              ? 'Sign in and complete your business profile to see AI-matched contracts.'
               : 'Add Supabase credentials in .env.local to enable live matching.'}
-            {' '}<Link href="/onboarding" className="underline font-medium">Get started →</Link>
+            {' '}
+            {isSupabaseConfigured && (
+              <><Link href="/signup" className="underline font-medium">Sign up free</Link> or <Link href="/login" className="underline font-medium">log in →</Link></>
+            )}
           </span>
         </div>
       )}
